@@ -455,19 +455,25 @@ async function startSharing() {
 
   setStatus("Waiting for screen selection...", "warning");
 
+  if (!navigator.mediaDevices || typeof navigator.mediaDevices.getDisplayMedia !== "function") {
+    setStatus("Screen capture is not available in this environment.", "error");
+    setConnectionInfo("getDisplayMedia is unavailable. Try running the app in a normal desktop session.");
+    return;
+  }
+
   let stream;
+  let attemptLabel = "";
   try {
-    stream = await navigator.mediaDevices.getDisplayMedia({
-      video: {
-        frameRate: { ideal: 30, max: 60 }
-      },
-      audio: {
-        systemAudio: "include"
-      }
-    });
+    const capture = await getDisplayMediaWithFallback();
+    stream = capture.stream;
+    attemptLabel = capture.label;
   } catch (error) {
     handleDisplayMediaError(error);
     return;
+  }
+
+  if (attemptLabel && attemptLabel !== "required-system-audio") {
+    showToast(`Using compatibility capture mode: ${attemptLabel}`);
   }
 
   if (!stream.getAudioTracks().length) {
@@ -491,6 +497,63 @@ async function startSharing() {
 
   await ipcRenderer.invoke("window:minimize");
   placeOutgoingCall();
+}
+
+async function getDisplayMediaWithFallback() {
+  const candidates = [
+    {
+      label: "required-system-audio",
+      constraints: {
+        video: {
+          frameRate: { ideal: 30, max: 60 }
+        },
+        audio: {
+          systemAudio: "include"
+        }
+      }
+    },
+    {
+      label: "top-level-system-audio",
+      constraints: {
+        video: {
+          frameRate: { ideal: 30, max: 60 }
+        },
+        audio: true,
+        systemAudio: "include"
+      }
+    },
+    {
+      label: "audio-true-fallback",
+      constraints: {
+        video: {
+          frameRate: { ideal: 30, max: 60 }
+        },
+        audio: true
+      }
+    }
+  ];
+
+  let lastError = null;
+
+  for (const candidate of candidates) {
+    try {
+      const stream = await navigator.mediaDevices.getDisplayMedia(candidate.constraints);
+      return { stream, label: candidate.label };
+    } catch (error) {
+      lastError = error;
+      if (!isConstraintCompatibilityError(error)) {
+        throw error;
+      }
+    }
+  }
+
+  throw lastError || new Error("Unable to start display capture.");
+}
+
+function isConstraintCompatibilityError(error) {
+  if (!error || typeof error !== "object") return false;
+  const name = String(error.name || "");
+  return name === "NotSupportedError" || name === "TypeError" || name === "OverconstrainedError";
 }
 
 async function stopSharing(options = {}) {
@@ -654,6 +717,24 @@ function handleDisplayMediaError(error) {
 
   if (error.name === "NotAllowedError") {
     setStatus("Screen share was canceled or blocked by permissions.", "warning");
+    return;
+  }
+
+  if (error.name === "NotSupportedError") {
+    setStatus("Screen share is not supported with current capture settings.", "error");
+    setConnectionInfo("If on Remote Desktop/VM, try local session. Otherwise update GPU/audio drivers.");
+    return;
+  }
+
+  if (error.name === "InvalidStateError") {
+    setStatus("Screen share failed because the app was not in a capturable state.", "warning");
+    setConnectionInfo("Bring app to foreground and retry.");
+    return;
+  }
+
+  if (error.name === "NotReadableError") {
+    setStatus("Screen source could not be read.", "error");
+    setConnectionInfo("Another app or OS policy may be blocking capture.");
     return;
   }
 

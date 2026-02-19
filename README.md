@@ -59,3 +59,4 @@ npm start
 - If connection stays in dialing, the app now auto-times out and resets after ~18s so you can retry cleanly.
 - On first run, allow Windows Firewall access for private networks.
 - If you see `Failed to resolve address for eu-0.turn.peerjs.com` or `us-0.turn.peerjs.com`, this is DNS failure for PeerJS default TURN hosts. The app now avoids those hosts and uses custom ICE settings.
+- Screen capture now tries multiple compatibility modes if a specific display-audio constraint is unsupported by your runtime.
