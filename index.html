@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>P2P Screen Share</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="app">
+      <header class="topbar card">
+        <div>
+          <h1>P2P Screen Share</h1>
+          <p>Windows 10/11 private network desktop sharing</p>
+        </div>
+        <div id="statusPill" class="status-pill idle">
+          <span class="dot" aria-hidden="true"></span>
+          <span id="statusText">Initializing...</span>
+        </div>
+      </header>
+
+      <section class="card">
+        <h2>Your Identity</h2>
+        <p class="label">Your Peer ID</p>
+        <div class="row">
+          <code id="myPeerId" class="peer-id">Connecting to PeerJS cloud...</code>
+          <button id="copyIdBtn" disabled>Copy</button>
+          <button id="reconnectSignalBtn">Reconnect Signal</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Connection</h2>
+        <p class="label">Friend's Peer ID</p>
+        <div class="row">
+          <input
+            id="friendIdInput"
+            type="text"
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="Paste your friend's ID"
+          />
+          <button id="connectBtn" disabled>Connect</button>
+          <button id="disconnectBtn" disabled>Disconnect</button>
+        </div>
+        <p id="connectionInfo" class="meta">Waiting for connection...</p>
+      </section>
+
+      <section class="card">
+        <h2>Screen Sharing</h2>
+        <div class="row">
+          <button id="startShareBtn" disabled>Start Sharing</button>
+          <button id="stopShareBtn" disabled>Stop Sharing</button>
+          <span id="liveTag" class="live-tag off">Offline</span>
+        </div>
+      </section>
+
+      <section class="video-grid">
+        <article class="card video-card">
+          <div class="video-head">
+            <h2>Local Preview</h2>
+            <span class="small-note">Muted</span>
+          </div>
+          <div class="video-shell">
+            <video id="localVideo" autoplay playsinline muted></video>
+            <p id="localPlaceholder" class="placeholder">No local stream</p>
+          </div>
+        </article>
+
+        <article class="card video-card">
+          <div class="video-head">
+            <h2>Remote Stream</h2>
+            <span class="small-note">Unmuted + controls</span>
+          </div>
+          <div class="video-shell">
+            <video id="remoteVideo" autoplay playsinline controls></video>
+            <p id="remotePlaceholder" class="placeholder">No remote stream</p>
+          </div>
+        </article>
+      </section>
+    </main>
+
+    <div id="toast" class="toast"></div>
+
+    <script src="./renderer.js"></script>
+  </body>
+</html>
