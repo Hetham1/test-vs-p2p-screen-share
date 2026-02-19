@@ -19,10 +19,23 @@ const localPlaceholder = document.getElementById("localPlaceholder");
 const remotePlaceholder = document.getElementById("remotePlaceholder");
 const toast = document.getElementById("toast");
 
-const PEER_OPTIONS = {
-  secure: true,
-  debug: 1
-};
+const DEFAULT_ICE_SERVERS = [
+  {
+    urls: [
+      "stun:stun.l.google.com:19302",
+      "stun:stun1.l.google.com:19302",
+      "stun:stun2.l.google.com:19302",
+      "stun:stun.cloudflare.com:3478"
+    ]
+  }
+];
+
+const TURN_URLS = parseCsvList(process.env.P2P_TURN_URLS);
+const TURN_USERNAME = (process.env.P2P_TURN_USERNAME || "").trim();
+const TURN_CREDENTIAL = (process.env.P2P_TURN_CREDENTIAL || "").trim();
+const HAS_CUSTOM_TURN = TURN_URLS.length > 0;
+
+const PEER_OPTIONS = buildPeerOptions();
 
 const CONNECT_TIMEOUT_MS = 18000;
 
@@ -40,6 +53,38 @@ let toastTimer = null;
 let connectTimeoutTimer = null;
 
 initialize();
+
+function parseCsvList(raw) {
+  if (!raw || typeof raw !== "string") return [];
+  return raw
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+function buildPeerOptions() {
+  const iceServers = [...DEFAULT_ICE_SERVERS];
+
+  if (HAS_CUSTOM_TURN) {
+    const turnServer = {
+      urls: TURN_URLS
+    };
+
+    if (TURN_USERNAME) turnServer.username = TURN_USERNAME;
+    if (TURN_CREDENTIAL) turnServer.credential = TURN_CREDENTIAL;
+
+    iceServers.push(turnServer);
+  }
+
+  return {
+    secure: true,
+    debug: 1,
+    config: {
+      sdpSemantics: "unified-plan",
+      iceServers
+    }
+  };
+}
 
 function initialize() {
   bindUiEvents();
@@ -107,6 +152,7 @@ function initPeer() {
     myPeerIdEl.textContent = id;
     copyIdBtn.disabled = false;
     setStatus("Waiting for connection...", "idle");
+    setConnectionInfo(getNetworkModeHint());
     updateControls();
   });
 
@@ -291,7 +337,11 @@ function armConnectTimeout(conn) {
   connectTimeoutTimer = setTimeout(() => {
     if (dataConn !== conn || conn.open) return;
     setStatus(`Could not establish P2P channel with ${conn.peer}.`, "error");
-    setConnectionInfo("Dial timed out. Ensure both apps are online, then click Connect again.");
+    if (HAS_CUSTOM_TURN) {
+      setConnectionInfo("Dial timed out. Check firewall/NAT rules and TURN credentials, then retry.");
+    } else {
+      setConnectionInfo("Dial timed out. On different networks, configure TURN env vars before retrying.");
+    }
     if (!conn.open) {
       conn.close();
     }
@@ -585,7 +635,11 @@ function handlePeerError(error) {
 
   if (type === "webrtc") {
     setStatus("WebRTC setup failed. Check firewall/NAT and retry.", "error");
-    setConnectionInfo("P2P transport could not be established.");
+    if (HAS_CUSTOM_TURN) {
+      setConnectionInfo("P2P transport failed even with TURN configured. Verify TURN server reachability.");
+    } else {
+      setConnectionInfo("P2P transport failed in STUN-only mode. Configure TURN env vars for cross-network use.");
+    }
     return;
   }
 
@@ -694,6 +748,13 @@ function setStatus(text, state = "idle") {
 
 function setConnectionInfo(text) {
   connectionInfo.textContent = text;
+}
+
+function getNetworkModeHint() {
+  if (HAS_CUSTOM_TURN) {
+    return "Network mode: STUN + TURN configured.";
+  }
+  return "Network mode: STUN-only (best on same LAN). Set TURN env vars for cross-network reliability.";
 }
 
 function setLiveTag(isLive) {

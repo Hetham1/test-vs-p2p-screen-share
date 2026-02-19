@@ -29,6 +29,20 @@ npm install
 npm start
 ```
 
+## TURN Configuration (For Different Networks)
+
+By default, the app runs in STUN-only mode (best for same LAN/private home network).
+For reliable cross-network connection, set TURN env vars before `npm start`.
+
+PowerShell example:
+
+```powershell
+$env:P2P_TURN_URLS="turn:your-turn-host:3478?transport=udp,turn:your-turn-host:3478?transport=tcp"
+$env:P2P_TURN_USERNAME="your-turn-username"
+$env:P2P_TURN_CREDENTIAL="your-turn-password"
+npm start
+```
+
 ## Usage
 
 1. Launch app and wait until your Peer ID appears.
@@ -44,3 +58,4 @@ npm start
 - If signaling fails, click `Reconnect Signal`.
 - If connection stays in dialing, the app now auto-times out and resets after ~18s so you can retry cleanly.
 - On first run, allow Windows Firewall access for private networks.
+- If you see `Failed to resolve address for eu-0.turn.peerjs.com` or `us-0.turn.peerjs.com`, this is DNS failure for PeerJS default TURN hosts. The app now avoids those hosts and uses custom ICE settings.
