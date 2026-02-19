@@ -24,6 +24,8 @@ const PEER_OPTIONS = {
   debug: 1
 };
 
+const CONNECT_TIMEOUT_MS = 18000;
+
 let peer = null;
 let peerReady = false;
 let myPeerId = "";
@@ -35,6 +37,7 @@ let incomingCall = null;
 let isStoppingShare = false;
 let cloudErrorNotified = false;
 let toastTimer = null;
+let connectTimeoutTimer = null;
 
 initialize();
 
@@ -114,7 +117,7 @@ function initPeer() {
       setStatus("Rejected extra incoming connection from another peer.", "warning");
       return;
     }
-    attachDataConnection(conn);
+    attachDataConnection(conn, { source: "incoming" });
   });
 
   activePeer.on("call", (call) => {
@@ -167,30 +170,58 @@ function connectToFriend() {
     return;
   }
 
+  if (dataConn && !dataConn.open && dataConn.peer === targetId) {
+    setStatus(`Still dialing ${targetId}...`, "warning");
+    return;
+  }
+
   setStatus(`Connecting to ${targetId}...`, "warning");
   setConnectionInfo(`Dialing ${targetId}...`);
 
   try {
     const conn = peer.connect(targetId, {
       reliable: true,
-      serialization: "json"
+      serialization: "json",
+      metadata: { app: "p2p-screen-share", role: "outgoing" }
     });
-    attachDataConnection(conn);
+    attachDataConnection(conn, { source: "outgoing" });
   } catch (error) {
     setStatus(`Failed to open connection: ${error.message || "unknown error"}`, "error");
   }
 }
 
-function attachDataConnection(conn) {
+function attachDataConnection(conn, options = {}) {
+  const source = options.source || "unknown";
+  conn.__source = source;
+
   if (dataConn && dataConn !== conn) {
-    dataConn.close();
+    if (dataConn.peer !== conn.peer) {
+      dataConn.close();
+    } else {
+      const keepCurrent = shouldKeepCurrentConnection(dataConn, conn);
+      if (keepCurrent) {
+        conn.close();
+        return;
+      }
+      dataConn.close();
+    }
   }
 
   dataConn = conn;
   friendIdInput.value = conn.peer;
+  if (source === "incoming") {
+    setStatus(`Incoming connection from ${conn.peer}...`, "warning");
+    setConnectionInfo(`Establishing data channel with ${conn.peer}...`);
+  }
+  armConnectTimeout(conn);
   updateControls();
 
   conn.on("open", () => {
+    if (dataConn !== conn) {
+      conn.close();
+      return;
+    }
+    clearConnectTimeout();
     friendIdInput.value = conn.peer;
     setStatus(`Connected to ${conn.peer}`, "ok");
     setConnectionInfo(`Data channel open with ${conn.peer}`);
@@ -206,6 +237,9 @@ function attachDataConnection(conn) {
   });
 
   conn.on("close", async () => {
+    if (dataConn === conn) {
+      clearConnectTimeout();
+    }
     if (dataConn !== conn) return;
     dataConn = null;
     setConnectionInfo("Waiting for connection...");
@@ -220,8 +254,58 @@ function attachDataConnection(conn) {
   });
 
   conn.on("error", (error) => {
+    if (dataConn === conn) {
+      clearConnectTimeout();
+    }
     setStatus(`Data connection error: ${error.message || "unknown error"}`, "error");
+    if (dataConn === conn && !conn.open) {
+      dataConn = null;
+      setConnectionInfo("Connection failed. Try Connect again.");
+      updateControls();
+    }
   });
+}
+
+function shouldKeepCurrentConnection(current, candidate) {
+  if (current.open && !candidate.open) return true;
+  if (!current.open && candidate.open) return false;
+
+  const currentId = String(current.connectionId || "");
+  const candidateId = String(candidate.connectionId || "");
+  if (currentId && candidateId && currentId !== candidateId) {
+    return currentId <= candidateId;
+  }
+
+  const currentSource = String(current.__source || "");
+  const candidateSource = String(candidate.__source || "");
+  if (currentSource && candidateSource && currentSource !== candidateSource) {
+    const keepOutgoing = myPeerId && current.peer ? myPeerId < current.peer : true;
+    return currentSource === "outgoing" ? keepOutgoing : !keepOutgoing;
+  }
+
+  return true;
+}
+
+function armConnectTimeout(conn) {
+  clearConnectTimeout();
+  connectTimeoutTimer = setTimeout(() => {
+    if (dataConn !== conn || conn.open) return;
+    setStatus(`Could not establish P2P channel with ${conn.peer}.`, "error");
+    setConnectionInfo("Dial timed out. Ensure both apps are online, then click Connect again.");
+    if (!conn.open) {
+      conn.close();
+    }
+    if (dataConn === conn) {
+      dataConn = null;
+      updateControls();
+    }
+  }, CONNECT_TIMEOUT_MS);
+}
+
+function clearConnectTimeout() {
+  if (!connectTimeoutTimer) return;
+  clearTimeout(connectTimeoutTimer);
+  connectTimeoutTimer = null;
 }
 
 function handleIncomingCall(call) {
@@ -499,6 +583,12 @@ function handlePeerError(error) {
     return;
   }
 
+  if (type === "webrtc") {
+    setStatus("WebRTC setup failed. Check firewall/NAT and retry.", "error");
+    setConnectionInfo("P2P transport could not be established.");
+    return;
+  }
+
   setStatus(`Peer error (${type}): ${message}`, "error");
 }
 
@@ -531,6 +621,7 @@ async function disconnectSession() {
   clearRemoteStream("No remote stream");
 
   if (dataConn) {
+    clearConnectTimeout();
     const conn = dataConn;
     dataConn = null;
     conn.close();
@@ -542,6 +633,7 @@ async function disconnectSession() {
 }
 
 async function reconnectSignal() {
+  clearConnectTimeout();
   cleanupAllState({ restoreWindow: true, destroyPeer: true });
   myPeerId = "";
   peerReady = false;
@@ -554,6 +646,7 @@ async function reconnectSignal() {
 }
 
 function cleanupAllState(options = {}) {
+  clearConnectTimeout();
   if (localStream) {
     localStream.getTracks().forEach((track) => track.stop());
     localStream = null;
@@ -584,10 +677,11 @@ function cleanupAllState(options = {}) {
 function updateControls() {
   const friendId = friendIdInput.value.trim();
   const connected = Boolean(dataConn && dataConn.open);
+  const dialing = Boolean(dataConn && !dataConn.open);
 
   copyIdBtn.disabled = !myPeerId;
-  connectBtn.disabled = !peerReady || !friendId || connected;
-  disconnectBtn.disabled = !(connected || localStream || remoteStream || incomingCall || outgoingCall);
+  connectBtn.disabled = !peerReady || !friendId || connected || dialing;
+  disconnectBtn.disabled = !(connected || dialing || localStream || remoteStream || incomingCall || outgoingCall);
   startShareBtn.disabled = !(connected && !localStream);
   stopShareBtn.disabled = !localStream;
 }

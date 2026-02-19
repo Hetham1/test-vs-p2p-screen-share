@@ -42,3 +42,5 @@ npm start
 
 - Best results are on private home networks and allowed firewall rules.
 - If signaling fails, click `Reconnect Signal`.
+- If connection stays in dialing, the app now auto-times out and resets after ~18s so you can retry cleanly.
+- On first run, allow Windows Firewall access for private networks.
